@@ -1,0 +1,16 @@
+data/format_rs232.h.i
+data/ADC.h.i
+data/queue.h.i
+data/i2c.h.i
+data/display_atm1602.h.i
+data/uart.h.i
+data/deque.h.i
+data/.hgignore.i
+data/string.h.i
+data/rs232new-basic.h.i
+data/eeprom.h.i
+data/pair.h.i
+data/format.h.i
+data/sstream.h.i
+data/wait.h.i
+data/util.h.i
