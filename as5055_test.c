@@ -106,7 +106,6 @@ public:
 	
 	static void start(const uint16_t &reg = c_angular_data_register)
 	{
-                m_started = true;
 		m_spi_cmd = reg;
 		en0_cs::clear();
 		SPDR = m_spi_cmd >> 8;
@@ -161,7 +160,6 @@ private:
 	volatile uint8_t m_agc;
 	uint8_t m_speed_timer;
 
-        static volatile bool m_started;
 	static uint8_t m_temp;
 	static volatile uint8_t m_spi_state;
 	static volatile uint16_t m_spi_cmd;
@@ -178,14 +176,13 @@ public:
 };
 
 encoder_t en_left;
-encoder_t en_right;
+//encoder_t en_right;
 
 uint8_t encoder_t::m_temp = 0;
 volatile uint8_t encoder_t::m_spi_state = 0;
 volatile uint16_t encoder_t::m_spi_cmd = encoder_t::c_angular_data_register;
 volatile uint16_t encoder_t::m_spi_last_cmd = encoder_t::c_angular_data_register;
 volatile bool encoder_t::m_read = 0;
-volatile bool encoder_t::m_started = false;
 
 /*
 void encoder_t::process()
@@ -225,22 +222,14 @@ void encoder_t::process()
 
 void encoder_t::process()
 {
-/*        if(!m_started)
-        {
-                debug<<endl<<endl<<"refused"<<endl;
-                SPDR = 0x00;
-                return;
-        }*/
         switch (m_spi_state++)
         {
         case 0:
                 m_temp = SPDR;
                 SPDR = m_spi_cmd & 0xFF;
-                //debug<<endl<<endl<<" OK a " << m_spi_cmd << " " << m_spi_state <<endl;
                 break;
                         
         case 1:
-                //debug<<endl<<endl<<" OK b"<<endl;
                 en0_cs::set();
                 en_left.set((m_temp<<8)|SPDR);
                 m_spi_state = 0;
@@ -308,6 +297,129 @@ void write32(uint32_t val)
         uart.write(val & 0xFF);
 }
 
+class Packet
+{
+public:
+    Packet()
+    {
+            clear();
+    }
+    Packet(uint8_t cmd)
+    {
+            clear();
+            m_cmd = cmd;
+    }
+
+    void setCmd(uint8_t cmd)
+    {
+        m_cmd = cmd;
+    }
+
+    void clear()
+    {
+            m_cmd = 0;
+            m_len = 0;
+            m_ritr = 0;
+            m_recv = 0;
+    }
+    bool add(uint8_t ch)
+    {     
+        switch(m_recv)
+        {
+                case 0:
+                    if(ch != 0xFF)
+                        return false;
+                    break;
+                case 1:
+                    if(ch != 0x00 && ch != 0x01)
+                        return false;
+                    break;
+                case 2:
+                    m_len = ch;
+                    break;
+                case 3:
+                    m_cmd = ch;
+                    break;
+                default:
+                {
+                    if(m_recv-3 >= m_len)
+                        return false;
+
+                    m_data[m_recv - 4] = ch;
+                    break;
+                }
+        }
+        ++m_recv;
+        return true;
+    }
+    bool isValid()
+    {
+        return (m_len && 3+m_len == m_recv);
+    }
+    void send()
+    {
+        uart.write(0xFF);
+        uart.write(0x00);
+        uart.write(m_len+1);
+        uart.write(m_cmd);
+
+        for(uint8_t i = 0; i < m_len; ++i)
+            uart.write(m_data[i]);
+    }
+
+    uint8_t getCmd() const { return m_cmd; }
+    
+    void setWriteItr(int pos)
+    {
+        m_len = pos;
+    }
+
+    void write8(const uint8_t& v)
+    {
+        m_data[m_len++] = v;
+    }
+    void write16(const int16_t& v)
+    {
+        m_data[m_len++] = (v >> 8);
+        m_data[m_len++] = (v & 0xFF);
+    }
+    void write32(const uint32_t& v)
+    {
+        m_data[m_len++] = (v >> 24);
+        m_data[m_len++] = (v >> 16);
+        m_data[m_len++] = (v >> 8);
+        m_data[m_len++] = (v & 0xFF);
+    }
+
+    uint8_t read8()
+    {
+         return m_data[m_ritr++];
+    }
+    uint16_t read16()
+    {
+        uint16_t res = (m_data[m_ritr++] << 8);
+        res |= m_data[m_ritr++];
+        return res;
+    }
+    
+    uint32_t read32()
+    {
+         uint32_t res = ((uint32_t)m_data[m_ritr++] << 24);
+        res |= ((uint32_t)m_data[m_ritr++] << 16);
+        res |= (m_data[m_ritr++] << 8);
+        res |= m_data[m_ritr++];
+        return res;
+    }
+
+private:
+    uint8_t m_len;
+    uint8_t m_cmd;
+    uint8_t m_data[20];
+
+    uint8_t m_recv;
+    uint8_t m_ritr;
+};
+
 int main(void)
 {
 /*
@@ -359,7 +471,8 @@ int main(void)
 	int16_t power = 0;
 	
 	//DDRB |= (1<<7);
-	
+	Packet pkt;
+    Packet sendPkt;
 	for(;;)
 	{
                 if(encoder_t::read())
@@ -367,18 +480,36 @@ int main(void)
                         en_left.compute();
                         
                         encoder_t::processed();
-                        uart.write(0xFF);
-                        uart.write(0x01);
-                        uart.write(12);
-                        uart.write(0x01);
                         
-                        write16(en_left.value());         // 0
-                        write32(en_left.distance());      // 2
-                        write16(en_left.speed());         // 6
-                        write16(en_left.acceleration());  // 8
-                        uart.write(en_left.agc());        // 10
-                        uart.write(en_left.state());      // 11
+                        sendPkt.setWriteItr(0);
+                        sendPkt.write16(en_left.value());         // 0
+                        sendPkt.write32(en_left.distance());      // 2
+                        sendPkt.write16(en_left.speed());         // 6
+                        sendPkt.write16(en_left.acceleration());  // 8
+                        sendPkt.write8(en_left.agc());        // 10
+                        sendPkt.write8(en_left.state());      // 11
+                        sendPkt.send();
                 }
+                
+                if(debug.peek(ch))
+                {
+                    pkt.add(ch);
+                    if(!pkt.isValid())
+                        continue;
+                    switch(pkt.getCmd())
+                    {
+                        case 0:
+                            en_left.clear();
+                            break;
+                        case 1:
+                            clear_error_flag = true;
+                            while(clear_error_flag) {}
+                            while(!encoder_t::read()) {}
+                            break;
+                    }
+                    pkt.clear();
+                }
+                     
 /*                if (encoder_t::read())
 		{
 			PORTB |= (1<<7);
