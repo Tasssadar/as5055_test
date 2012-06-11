@@ -473,6 +473,7 @@ int main(void)
 	//DDRB |= (1<<7);
 	Packet pkt;
     Packet sendPkt;
+        bool send = true;
 	for(;;)
 	{
                 if(encoder_t::read())
@@ -481,6 +482,7 @@ int main(void)
                         
                         encoder_t::processed();
                         
+                        if(send) {
                         sendPkt.setWriteItr(0);
                         sendPkt.write16(en_left.value());         // 0
                         sendPkt.write32(en_left.distance());      // 2
@@ -489,6 +491,7 @@ int main(void)
                         sendPkt.write8(en_left.agc());        // 10
                         sendPkt.write8(en_left.state());      // 11
                         sendPkt.send();
+                        }
                 }
                 
                 if(debug.peek(ch))
@@ -505,6 +508,9 @@ int main(void)
                             clear_error_flag = true;
                             while(clear_error_flag) {}
                             while(!encoder_t::read()) {}
+                            break;
+                        case 2:
+                            send = pkt.read8();
                             break;
                     }
                     pkt.clear();
