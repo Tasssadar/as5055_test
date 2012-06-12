@@ -1,5 +1,0 @@
-remove wait from ostream_t
-add front method to queue
-make uart transmiting synchronous by default
-add pair
-add library for i2c

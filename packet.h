@@ -24,7 +24,7 @@ public:
             m_recv = 0;
     }
     bool add(uint8_t ch)
-    {     
+    {
         switch(m_recv)
         {
                 case 0:
