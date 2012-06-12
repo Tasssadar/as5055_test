@@ -266,7 +266,12 @@ int main(void)
         
         if(debug.peek(ch))
         {
-            pkt.add(ch);
+            if(!pkt.add(ch))
+            {
+                pkt.clear();
+                continue;
+            }
+
             if(!pkt.isValid())
                 continue;
 
